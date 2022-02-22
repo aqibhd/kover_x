@@ -1,9 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:kover_x/const_file.dart';
+import 'package:kover_x/widgets/close_btn.dart';
+import 'package:kover_x/widgets/custom_icon_button.dart';
 import 'package:kover_x/widgets/grid_of_images.dart';
 import 'package:kover_x/widgets/load_more_btn.dart';
+import 'package:kover_x/widgets/no_internet_banner.dart';
+import 'package:simple_connection_checker/simple_connection_checker.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({Key? key}) : super(key: key);
@@ -14,52 +20,103 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   List images = [];
-  TextEditingController _controller = TextEditingController();
-  bool isBorderOnBtn = false;
-  bool isShown = false;
+  final TextEditingController _controller = TextEditingController();
+  bool pressed = false;
+  bool isEnable = false;
+  late bool isLoading; //is data being fetched?
+  late bool queryActive;
+  late bool _connected2Network;
+  StreamSubscription? subscription;
   int _pageNo = 1;
-  String? query;
+  late String query;
+
+  @override
+  void initState() {
+    super.initState();
+    isLoading = false;
+    _connected2Network = true;
+    queryActive = false;
+    networkCheck();
+    subscription =
+        SimpleConnectionChecker().onConnectionChange.listen((connected) {
+      //listen to internet
+      if (connected) {
+        networkCheck();
+      } else {
+        _connected2Network = connected;
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    subscription?.cancel();
+    super.dispose();
+  }
+
+  void networkCheck() async {
+    //check for internet access and fetch data
+    _connected2Network = await SimpleConnectionChecker.isConnectedToInternet();
+    setState(() {});
+    if (queryActive) {
+      fetchQuery();
+    }
+    if (isLoading && !queryActive) {
+      fetchMore();
+    }
+  }
 
   fetchQuery() async {
-    _pageNo = 1;
-    await http.get(
-        Uri.parse(
-            'https://api.pexels.com/v1/search?query=$query&per_page=80&page=$_pageNo'),
-        headers: {
-          'Authorization':
-              '563492ad6f917000010000013828121f1c0e40caa2a2b92e8da6a38b'
-        }).then((value) {
-      Map result = jsonDecode(value.body);
-      images = result['photos'];
-      setState(() {});
-    });
+    isLoading = true;
+    queryActive = true;
+    setState(() {});
+    if (_connected2Network) {
+      await http.get(
+          Uri.parse(
+              'https://api.pexels.com/v1/search?query=$query&per_page=80&page=$_pageNo'),
+          headers: {
+            'Authorization':
+                '563492ad6f917000010000013828121f1c0e40caa2a2b92e8da6a38b'
+          }).then((value) {
+        Map result = jsonDecode(value.body);
+        images = result['photos'];
+        isLoading = false;
+        queryActive = false;
+        setState(() {});
+      });
+    }
   }
 
   fetchMore() async {
-    isShown = false;
-    _pageNo = _pageNo + 1;
+    isEnable = false;
+    isLoading = true;
     setState(() {});
-    await http.get(
-        Uri.parse(
-            'https://api.pexels.com/v1/search?query=$query&per_page=80&page=$_pageNo'),
-        headers: {
-          'Authorization':
-              '563492ad6f917000010000013828121f1c0e40caa2a2b92e8da6a38b'
-        }).then((value) {
-      Map result = jsonDecode(value.body);
-      setState(() {
-        images.addAll(result['photos']);
+    if (_connected2Network) {
+      _pageNo = _pageNo + 1;
+      await http.get(
+          Uri.parse(
+              'https://api.pexels.com/v1/search?query=$query&per_page=80&page=$_pageNo'),
+          headers: {
+            'Authorization':
+                '563492ad6f917000010000013828121f1c0e40caa2a2b92e8da6a38b'
+          }).then((value) {
+        Map result = jsonDecode(value.body);
+        setState(() {
+          isLoading = false;
+          images.addAll(result['photos']);
+        });
       });
-    });
+    }
   }
 
   enableLoad() {
-    isShown = true;
+    isEnable = true;
     setState(() {});
   }
 
   disableLoad() {
-    isShown = false;
+    isEnable = false;
     setState(() {});
   }
 
@@ -67,7 +124,7 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     return Scaffold(
         body: Container(
-      color: const Color(0xff181B1F),
+      color: primary,
       height: MediaQuery.of(context).size.height,
       width: MediaQuery.of(context).size.width,
       child: Column(children: [
@@ -83,31 +140,15 @@ class _SearchPageState extends State<SearchPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.only(left: 8),
-                child: InkWell(
-                  onTap: () {
-                    isBorderOnBtn = true;
-                    setState(() {});
-                    Future.delayed(const Duration(seconds: 1), () {
-                      isBorderOnBtn = false;
-                      setState(() {});
-                    });
+                child: CustomIconButton(
+                  icon: const Icon(
+                    Icons.close,
+                    color: Colors.white,
+                  ),
+                  task: () async {
                     Navigator.pop(context);
                   },
-                  child: Container(
-                    height: 36,
-                    width: 36,
-                    alignment: Alignment.center,
-                    child: const Icon(
-                      Icons.close,
-                      color: Color(0xff596271),
-                    ),
-                    decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: isBorderOnBtn
-                            ? Border.all(
-                                color: const Color(0xff121417), width: 2)
-                            : Border.all(color: const Color(0xff181B1F))),
-                  ),
+                  buttonTypeClose: true,
                 ),
               ),
               Expanded(
@@ -116,8 +157,10 @@ class _SearchPageState extends State<SearchPage> {
                   child: SizedBox(
                     height: 40,
                     width: MediaQuery.of(context).size.width,
-                    //color: Colors.pink,
                     child: TextField(
+                      keyboardType: TextInputType.text,
+                      textInputAction: TextInputAction.search,
+                      textAlignVertical: TextAlignVertical.center,
                       controller: _controller,
                       onSubmitted: (string) {
                         query = string;
@@ -128,13 +171,12 @@ class _SearchPageState extends State<SearchPage> {
                         fontWeight: FontWeight.normal,
                         color: Colors.white,
                       ),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         filled: true,
                         border: InputBorder.none,
-                        fillColor: Color(0xff121417),
+                        fillColor: primary,
                         hintStyle: TextStyle(
-                            fontWeight: FontWeight.normal,
-                            color: Color(0xffA0A0A0)),
+                            fontWeight: FontWeight.normal, color: hintColor),
                         hintText: "Search for wallpapers",
                       ),
                       autocorrect: true,
@@ -144,10 +186,21 @@ class _SearchPageState extends State<SearchPage> {
               )
             ],
           ),
-          //color: Colors.red,
         ),
-        Grid(source: images, enable: enableLoad, disable: disableLoad),
-        LoadMoreBtn(loadMore: fetchMore, isShown: isShown)
+        !_connected2Network ? noInternetBanner(context) : const SizedBox(),
+        Grid(
+          source: images,
+          enable: enableLoad,
+          disable: disableLoad,
+          loading: isLoading,
+        ),
+        Visibility(
+            visible: images.isNotEmpty ? true : false,
+            child: LoadMoreBtn(
+              loadMore: fetchMore,
+              btnStatus: isEnable,
+              loadStatus: isLoading,
+            ))
       ]),
     ));
   }
